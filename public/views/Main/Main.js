@@ -1,116 +1,82 @@
-import View from '../../modules/View/View';
-import transport from '../../modules/Transport/Transport';
-import userService from '../../services/UserService/UserService';
+import Block from '../../components/Block/Block';
+import viewService from '../../services/ViewService/ViewService';
+import mainViewService from '../../services/MainViewService/MainViewService';
+import preLoader from '../PreLoader/PreLoader';
+import FullScreen from "../../modules/FullScreen/FullScreen";
 
 import './Main.scss';
 import template from './Main.tmpl.xml';
 
-class Main extends View {
+export default class Main extends Block {
   constructor() {
-    super();
+    super('div', {
+      class: 'wrapper'
+    });
+
+    this._currentView = null;
+    this.toDocument(preLoader.render());
+
+    document.addEventListener('keydown', (event) => {
+      if (event.keyCode === 70) {
+        console.log('ffff');
+        new FullScreen().toggle(document.body);
+      }
+    });
   }
 
-  init(options = {}) {
-    this._getRequestIsLogin();
+  init() {
+    this._builtBase(template());
+    this.toDocument(this.render());
   }
 
-  _makeMain(state = false) {
-    this._el.innerHTML = template(this._changeForm(state));
-    if (state) {
-      this._logoutButton();
-    }
-  }
-
-  _changeForm(state) {
-    return state ? this._getLoggedForm() : this._getUnLoggedForm();
-  }
-
-  logout() {
-    const state = userService.getState();
-
-    if (state) {
-      this._postRequestLogout();
-      userService.setState(false);
-      this.show();
-    }
-  }
-
-  _postRequestLogout() {
-    transport.post('/logout', JSON.stringify({ 'name': 'top' }))
-      .then(response => {
-        if (+response.status === 200) {
-          userService.setState(false);
-        }
-      })
-      .catch(error => {
-        console.log(error);
-      });
-  }
-
-  _getRequestIsLogin() {
-    transport.get('/cur-user')
-      .then(response => {
-        if (+response.status === 200) {
-          userService.setState(true);
-        }
-        const state = userService.getState();
-
-        this._makeMain(state);
-
-        document.body.appendChild(this._el);
-
-        if (state) {
-          this._logoutButton();
-        }
-      })
-      .catch(error => {
-        console.log(error);
-      });
-  }
-
-  _logoutButton() {
-    const button = this._findLogoutButton();
-    if (button) {
-      button.addEventListener('click', this.logout.bind(this));
-      button.style.display = 'block';
-    }
-  }
-
-  _findLogoutButton() {
-    return (document.getElementsByName('logout'))[0];
-  }
-
-  _getUnLoggedForm() {
-    return {
-      buttons: [{
-        text: 'Sign Up',
-        action: '/signup'
-      }, {
-        text: 'Sign In',
-        action: '/signin'
-      }]
-    };
-  }
-
-  _getLoggedForm() {
-    return {
-      buttons: [{
-        text: 'Game',
-        action: '/game'
-      }, {
-        text: 'Scoreboard',
-        action: '/scoreboard'
-      }]
-    };
+  hide() {
   }
 
   show() {
-    const state = userService.getState();
+    viewService.showPreLoader();
 
-    this._makeMain(state);
-    this._el.style.display = 'block';
+    this._getDocument().querySelector('.wrapper').style.display = 'block';
+
+    viewService.isLogin()
+      .then(response => {
+        return {
+          status: +response.status === 200,
+          json: response.json()
+        }
+      })
+      .then(data => {
+        data.json
+          .then(user => {
+            if (!user.message) {
+              viewService.setUser({
+                login: user.login,
+                email: user.email
+              });
+            }
+
+            viewService.setState(data.status);
+            this._changeView();
+
+            viewService.hidePreLoader();
+          });
+
+      });
   }
 
-}
+  _changeView() {
+    const newView = mainViewService.getMainForm();
 
-export default Main;
+    if (!this._currentView || newView._buttons.length !== this._currentView._buttons.length) {
+      if (this._currentView) {
+        this._currentView.hide();
+      }
+
+      this._currentView = newView;
+      this._getElement().querySelector('.wrapper__main__wrapper').appendChild(this._currentView.render());
+    }
+  }
+
+  _builtBase(template) {
+    this._getElement().innerHTML = template;
+  }
+}
