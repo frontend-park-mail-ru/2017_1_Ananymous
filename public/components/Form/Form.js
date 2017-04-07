@@ -1,88 +1,290 @@
 import Block from '../Block/Block';
-import Button from '../Button/Button';
-import transport from '../../modules/Transport/Transport';
 import userService from '../../services/UserService/UserService';
+import formService from '../../services/FormService/FormService';
+import viewService from '../../services/ViewService/ViewService';
 
 import './Form.scss';
 import template from './Form.tmpl.xml';
 
 export default class Form extends Block {
   constructor(elements = {}) {
-    super('div', { class: 'form z-depth-2' });
-
-    this._isTrueForm = true;
+    super('div', {
+      class: 'form__wrapper'
+    });
 
     this._createForm(elements.data);
   }
 
   _createForm(elements) {
-    const titleForm = elements.title;
-
     this._getElement().innerHTML = template({
-      title: titleForm,
-      elements: elements.fields
+      title: elements.title,
+      elements: elements.fields,
+      control: elements.controls[0].text
     });
 
-    this._find('form').appendChild((this._submitButton(elements.controls[0], elements.controls[1].action, titleForm).render()));
-    this.append(this._backButton(elements.controls[1].action).render());
+    this._submitButton(elements.controls[0].action);
+    this._inputsFocusEvent(this._setFocus.bind(this));
   }
 
-  _submitButton(button, backAction, titleForm) {
-    const submit = new Button({
-      type: 'submit',
-      text: button.text
+  _inputsFocusEvent(callback) {
+    const form = this._getForm();
+
+    this._getKeys(form).forEach(input => {
+      callback(form[input]);
     });
-
-    submit.start('click', event => this._submit(event, button.action, backAction, titleForm));
-
-    return submit;
   }
 
-  _backButton(action) {
-    const back = new Button({
-      type: 'submit',
-      text: 'Back'
+  _checkByButton(element) {
+    const input = this._getInput(element);
+
+    if (input) {
+      const name = input.name;
+      const value = input.value;
+
+      const fill =
+        formService.checkFill(value,
+          this._getReadableNameByName(name)).response;
+
+      this._validate(element, input, name, value, fill);
+    }
+  }
+
+  _getForm() {
+    return this.find('form').querySelector('ul').children;
+  }
+
+  _getInput(element) {
+    return element.querySelector('input');
+  }
+
+  _setFocus(element) {
+    const input = this._getInput(element);
+
+    if (input) {
+      input.onblur = (() => {
+        const name = input.name;
+        const value = input.value;
+
+        this._checkForm(element, input, name, value);
+      });
+
+      input.onfocus = (() => {
+        this._defaultError(element);
+      });
+    }
+  }
+
+  _checkForm(...info) {
+    const [element, input, name, value] = info;
+
+    const fill =
+      formService.checkFill(value,
+        this._getReadableNameByName(name)).response;
+
+    this._validate(element, input, name, value, fill);
+  }
+
+  _validate(...settings) {
+    const [element, input, name, value, isFill] = settings;
+
+    if (isFill) {
+      this._addError(element, isFill);
+    } else {
+      const checkName = this._checkByName(name, value).response;
+
+      if (checkName) {
+        this._addError(element, checkName);
+
+        return;
+      }
+
+      if (name === 'password1') {
+        this._checkPasswordsByFirst(element, input);
+      }
+
+      if (name === 'password2' &&
+        !this._checkPasswordsByLast(element, input, value)) {
+
+        return;
+      }
+
+      this._successCheck(element);
+    }
+  }
+
+  _checkPasswordsByFirst(element, input) {
+    const secondPassword = this._getNextPassword(element);
+
+    if (secondPassword && secondPassword.classList.contains('error') &&
+      formService.checkPasswords(input, secondPassword).response) {
+      this._defaultError(secondPassword);
+      this._addOK(secondPassword);
+
+      return false;
+    }
+
+    return true;
+  }
+
+  _checkPasswordsByLast(element, value) {
+    const firstPassword = this._getPreviousPassword(element).value;
+    const compare = formService.checkPasswords(value.value, firstPassword).response;
+
+    if (compare) {
+      this._addError(element, compare);
+
+      return false;
+    }
+
+    return true;
+  }
+
+  _successCheck(element) {
+    this._addOK(element);
+    this._letGoSubmit(this._getFormByList(element), element.parentNode.querySelectorAll('li'));
+  }
+
+  _checkAllForm() {
+    const form = this._getForm();
+
+    this._getKeys(form).forEach(input => {
+      this._checkField(form[input]);
     });
-
-    back.start('click', action);
-
-    return back;
   }
 
-  _submit(event, uri, backAction, titleForm) {
-    event.preventDefault();
-    this._isTrueForm = true;
+  _checkField(element) {
 
-    const data = this._getData(titleForm);
-    this._checkFields(data);
+  }
 
-    if (this._isTrueForm) {
-      transport.post(uri, JSON.stringify(this._getSendPack(uri, data)))
+  _getFormByList(element) {
+    return element.parentNode.parentNode;
+  }
+
+  _addOK(element) {
+    const span = element.querySelector('span');
+
+    element.classList.remove('error');
+    element.classList.add('ok');
+
+    span.innerText = 'Excellent!';
+  }
+
+  _addError(element, errorText) {
+    const span = element.querySelector('span');
+
+    element.classList.add('error');
+    span.classList.add('errorText');
+    span.innerText = errorText;
+  }
+
+  _defaultError(element) {
+    this._setErrorResponse(0);
+    const span = element.querySelector('span');
+
+    element.classList.remove('error');
+    element.classList.remove('ok');
+
+    span.classList.remove('errorText');
+  }
+
+  _checkByName(type, value) {
+    switch (type) {
+      case 'login':
+        return formService.checkLogin(value);
+      case 'email':
+        return formService.checkEmail(value);
+      case 'password1':
+      case 'password2':
+        return formService.checkPassword(value);
+      default:
+        return '';
+    }
+  }
+
+  _getReadableNameByName(type) {
+    switch (type) {
+      case 'login':
+        return 'Login';
+      case 'email':
+        return 'E-Mail';
+      case 'password1':
+      case 'password2':
+        return 'Password';
+      default:
+        return '';
+
+    }
+  }
+
+  _letGoSubmit(list) {
+    for (let li of list) {
+      if (li.classList.contains('error')) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  _submitButton(action) {
+    const submit = this.find('.form-button');
+
+    submit.addEventListener('click', event => {
+      event.preventDefault();
+
+      this._inputsFocusEvent(this._checkByButton.bind(this));
+
+      this._send(event, action);
+    });
+  }
+
+  _send(event, action) {
+    if (this._letGoSubmit(this._getForm())) {
+      formService.showPreLoader();
+
+      this._submit(event, action)
         .then(response => {
-          return +response.status !== 200 ? response.json() : null;
+          console.log(response);
+          return +response.status;
         })
-        .then(data => {
-          const element = this._find('p');
-          const status = data == null;
+        .then(status => {
+          const state = status === 200;
 
-          element.textContent = (status) ? '' : data.message;
-          userService.setState(status);
-
-          if (status) {
-            backAction();
-          }
+          userService.setState(state);
+          state ? viewService.go('/') : this._setErrorResponse(status);
+          formService.hidePreLoader();
         });
     }
   }
 
-  _mainError(status, response) {
-    const element = document.querySelector('p.errorText');
-    const statusCheck = status === 200;
+  _setErrorResponse(status) {
+    this._writeError(this._getStringByErrorType(status));
+  }
 
-    console.log(response);
+  _writeError(string) {
+    const span = this.findAll('span')[2];
 
-    element.textContent = (statusCheck) ? '' : response.message;
-    userService.setState(status);
+    span.innerHTML = string;
+    span.style.display = 'block';
+  }
+
+  _getStringByErrorType(status) {
+    switch (+status) {
+      case 404:
+        return 'User not found';
+      case 409:
+        return 'User already exist';
+      default:
+        return '';
+    }
+  }
+
+  _submit(event, uri) {
+    event.preventDefault();
+
+    const data = this._getData();
+
+    return formService.sendRequest(uri, this._getSendPack(uri, data));
   }
 
   _getSendPack(uri, data) {
@@ -91,7 +293,7 @@ export default class Form extends Block {
 
   _signInPack(data) {
     return {
-      'username': data.email,
+      'username': data.login,
       'password': data.password1
     };
   }
@@ -104,167 +306,8 @@ export default class Form extends Block {
     };
   }
 
-  _checkFields(data) {
-    return 'password2' in data ? this._checkSignUpForm(data) :
-      this._checkSignInForm(data);
-  }
-
-  _checkSignUpForm(data) {
-    this._checkSignInForm(data);
-
-    const login = 'login';
-    const passwordRepeat = 'password2';
-    const loginElement = this._checkLogin(data.login);
-    const passwordRepeatElement = this._checkPasswordRepeat(data.password1, data.password2);
-
-    this._defaultError(login);
-    this._defaultError(passwordRepeat);
-
-    if (!loginElement.check) {
-      this._addError(login, loginElement.text);
-      this._isTrueForm = false;
-    }
-
-    if (!passwordRepeatElement.check) {
-      this._addError(passwordRepeat, passwordRepeatElement.text);
-      this._isTrueForm = false;
-    }
-  }
-
-  _checkSignInForm(data) {
-    const email = 'email';
-    const password = 'password1';
-    const emailElement = this._checkEmail(data.email);
-    const passwordElement = this._checkPassword(data.password1);
-
-    this._defaultError(email);
-    this._defaultError(password);
-
-    if (!emailElement.check) {
-      this._addError(email, emailElement.text);
-      this._isTrueForm = false;
-    }
-
-    if (!passwordElement.check) {
-      this._addError(password, passwordElement.text);
-      this._isTrueForm = false;
-    }
-  }
-
-  _defaultError(name) {
-    const elementInput = this._find(`input[name=${name}]`);
-    const elementLabel = this._find(`label[name=${name}]`);
-
-    elementInput.classList.remove('error');
-    elementLabel.innerText = '';
-  }
-
-  _addError(name, text) {
-    const elementInput = this._find(`input[name=${name}]`);
-    const elementLabel = this._find(`label[name=${name}]`);
-
-    elementInput.classList.add('error');
-    elementLabel.innerText = text;
-  }
-
-  _checkLogin(login) {
-    if (this._isFill(login)) {
-      return {
-        check: false,
-        text: 'Заполните поле login'
-      };
-    }
-
-    if (!this._validateLogin(login)) {
-      return {
-        check: false,
-        text: 'Введите верный login'
-      };
-    }
-
-    return {
-      check: true
-    };
-  }
-
-  _checkEmail(email) {
-    if (this._isFill(email)) {
-      return {
-        check: false,
-        text: 'Заполните поле email'
-      };
-    }
-
-    if (!this._validateEmail(email)) {
-      return {
-        check: false,
-        text: 'Введите верный email'
-      };
-    }
-
-    return {
-      check: true
-    };
-  }
-
-  _checkPassword(password) {
-    if (this._isFill(password)) {
-      return {
-        check: false,
-        text: 'Заполните поле password'
-      };
-    }
-
-    const regExpPassword = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?!.*\s).*$/;
-
-    if (password.length < 8 && !regExpPassword.test(password)) {
-      return {
-        check: false,
-        text: 'Введите корректный password'
-      };
-    }
-
-    return {
-      check: true
-    };
-  }
-
-  _checkPasswordRepeat(password1, password2) {
-    const isPassword = this._checkPassword(password2);
-
-    if (!isPassword.check) {
-      return isPassword;
-    }
-
-    if (password1 !== password2) {
-      return {
-        check: false,
-        text: 'Пароли не совпадают'
-      };
-    }
-
-    return {
-      check: true
-    };
-  }
-
-  _validateLogin(login) {
-    const regExpLogin = /^[a-zA-Z](.[a-zA-Z0-9_-]*)$/;
-    return regExpLogin.test(login);
-  }
-
-  _validateEmail(email) {
-    const regExpEmail =
-      /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
-    return regExpEmail.test(email);
-  }
-
-  _isFill(field) {
-    return field.trim().length === 0;
-  }
-
-  _getData(titleForm) {
-    const form = (document.getElementsByName(titleForm)[0]).elements;
+  _getData() {
+    const form = this.find('form').elements;
     const fields = {};
 
     this._getKeys(form).forEach(input => {
@@ -275,5 +318,23 @@ export default class Form extends Block {
       }
     });
     return fields;
+  }
+
+  _getPreviousElement(input) {
+    return input.previousElementSibling;
+  }
+
+  _getNextElement(input) {
+    return input.nextElementSibling;
+  }
+
+  _getPreviousPassword(passwordInput) {
+    const password = passwordInput.parentNode.children[2];
+    return password ? password.querySelector('input') : null;
+  }
+
+  _getNextPassword(passwordInput) {
+    const password = passwordInput.parentNode.children[3];
+    return password ? password.querySelector('input') : null;
   }
 }
